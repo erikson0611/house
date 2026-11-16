@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>3D 室內格局圖</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#eceef1;font-family:-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+canvas{touch-action:none;display:block}
+#ui{position:absolute;top:calc(10px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));background:rgba(255,255,255,.94);border-radius:12px;padding:10px 12px;box-shadow:0 2px 12px rgba(0,0,0,.12);font-size:13px;color:#222;width:250px;z-index:5;box-sizing:border-box}
+#ui .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+#ui h1{font-size:15px;margin:0}
+#toggle{padding:4px 10px}
+#ui.collapsed .body{display:none}
+.grp{margin:9px 0 4px;font-size:11.5px;color:#666}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+button{border:1px solid #c9ccd1;background:#fff;border-radius:8px;padding:6px 10px;font-size:12.5px;cursor:pointer;color:#222;font-family:inherit}
+button.on{background:#2b3a55;color:#fff;border-color:#2b3a55}
+.hint{color:#666;font-size:11.5px;line-height:1.55;margin-top:9px}
+#views{position:absolute;left:0;right:0;bottom:0;padding:8px calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;z-index:5;background:linear-gradient(to top,rgba(236,238,241,.95),rgba(236,238,241,0))}
+#views::-webkit-scrollbar{display:none}
+#views .sep{flex:0 0 1px;background:#c9ccd1;margin:4px 2px}
+#views button{flex:0 0 auto;border-radius:18px;padding:8px 14px;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,.08);white-space:nowrap}
+.lbl{background:rgba(255,255,255,.88);padding:2px 7px;border-radius:5px;font-size:12px;color:#1d1d1f;text-align:center;white-space:nowrap;pointer-events:none;line-height:1.3;box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.lbl.minor{background:rgba(255,255,255,.7);font-size:11px}
+#err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#a00;font-size:14px;padding:20px;text-align:center}
+@media (max-width:640px){
+  #ui{width:auto;max-width:calc(100vw - 20px);padding:8px 10px}
+  #ui h1{font-size:14px}
+  button{padding:8px 12px;font-size:13px}
+  .lbl{font-size:10.5px;padding:1px 5px}
+  .lbl.minor{font-size:10px}
+}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<div id="ui">
+  <div class="head"><h1>3D 室內格局圖</h1><button id="toggle">收合</button></div>
+  <div class="body">
+    <div class="grp">牆面與顯示</div>
+    <div class="row">
+      <button data-wall="2800" class="on">全高牆</button>
+      <button data-wall="1100">半高牆</button>
+      <button id="lblBtn" class="on">房間標籤</button>
+      <button id="spin">自動旋轉</button>
+    </div>
+    <div class="hint" id="hint"></div>
+    <div class="hint">尺寸依 1:50 平面圖（11.502 × 10.155 m）；層高 2.8 m 由窗高標註推算。</div>
+  </div>
+</div>
+<div id="views">
+  <button data-view="se">東南鳥瞰</button>
+  <button data-view="nw">西北鳥瞰</button>
+  <button data-view="ne">東北鳥瞰</button>
+  <button data-view="sw">西南鳥瞰</button>
+  <button data-view="top">平面俯視</button>
+  <button data-view="south">南向立面</button>
+  <span class="sep"></span>
+  <button data-view="entry">玄關</button>
+  <button data-view="living">客廳</button>
+  <button data-view="dining">餐廳</button>
+  <button data-view="kitchen">廚房</button>
+  <button data-view="master">主臥</button>
+  <button data-view="closet">更衣間</button>
+  <button data-view="second">次臥</button>
+  <button data-view="study">書房</button>
+  <button data-view="balcony">陽台</button>
+</div>
+<div id="err">3D 函式庫載入失敗，請確認網路後重新整理。</div>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {CSS2DRenderer, CSS2DObject} from 'three/addons/renderers/CSS2DRenderer.js';
+
+// ---------- 座標：平面圖 mm，x 向東、y 向南（圖面往下） ----------
+const OX = 5751, OY = 5077.5, MM = 0.001;
+const cx = x => (x - OX) * MM, cz = y => (y - OY) * MM;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xeceef1);
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(innerWidth, innerHeight);
+Object.assign(labelRenderer.domElement.style, {position: 'absolute', top: '0', left: '0', pointerEvents: 'none'});
+document.body.appendChild(labelRenderer.domElement);
+
+const fovFor = () => innerWidth / innerHeight < 1 ? 60 : 42;
+const camera = new THREE.PerspectiveCamera(fovFor(), innerWidth / innerHeight, 0.05, 200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI / 2 - 0.03;
+controls.minDistance = 2;
+controls.maxDistance = 45;
+
+// ---------- 燈光 ----------
+scene.add(new THREE.HemisphereLight(0xffffff, 0xbfb6a8, 1.6));
+const sun = new THREE.DirectionalLight(0xfff4e5, 2.4);
+sun.position.set(5, 16, 9);
+sun.castShadow = true;
+sun.shadow.mapSize.setScalar(matchMedia('(pointer: coarse)').matches ? 1024 : 2048);
+Object.assign(sun.shadow.camera, {left: -10, right: 10, top: 10, bottom: -10, near: 1, far: 50});
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.02;
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0xe8f0ff, 0.6);
+fill.position.set(-8, 10, -6);
+scene.add(fill);
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.MeshStandardMaterial({color: 0xdfe2e6, roughness: 1}));
+ground.rotation.x = -Math.PI / 2; ground.position.y = -0.005; ground.receiveShadow = true;
+scene.add(ground);
+
+// ---------- 材質 ----------
+function canvasTex(draw, size = 512) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  draw(c.getContext('2d'), size);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+}
+const rnd = (a, b) => a + Math.random() * (b - a);
+const woodTex = canvasTex((g, s) => {
+  const rows = 8, h = s / rows;
+  for (let r = 0; r < rows; r++) {
+    let x = -(r % 3) * s / 6;
+    while (x < s) {
+      const len = s / 2;
+      g.fillStyle = `hsl(${rnd(30, 36)},${rnd(30, 38)}%,${rnd(67, 74)}%)`;
+      g.fillRect(x, r * h, len, h);
+      g.strokeStyle = 'rgba(120,85,50,.10)';
+      for (let k = 0; k < 5; k++) { g.beginPath(); const yy = r * h + rnd(3, h - 3); g.moveTo(x, yy); g.bezierCurveTo(x + len * .3, yy + rnd(-3, 3), x + len * .6, yy + rnd(-3, 3), x + len, yy); g.stroke(); }
+      g.strokeStyle = 'rgba(110,80,50,.22)'; g.strokeRect(x + .5, r * h + .5, len - 1, h - 1);
+      x += len;
+    }
+  }
+});
+function tileTex(base, line, n) {
+  return canvasTex((g, s) => {
+    g.fillStyle = base; g.fillRect(0, 0, s, s);
+    const t = s / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { g.fillStyle = `rgba(0,0,0,${rnd(0, .03)})`; g.fillRect(i * t, j * t, t, t); }
+    g.strokeStyle = line; g.lineWidth = 3;
+    for (let i = 0; i <= n; i++) { g.beginPath(); g.moveTo(i * t, 0); g.lineTo(i * t, s); g.stroke(); g.beginPath(); g.moveTo(0, i * t); g.lineTo(s, i * t); g.stroke(); }
+  });
+}
+const FLOOR = {
+  wood:   {mat: new THREE.MeshStandardMaterial({map: woodTex, roughness: .7}), ts: 1.6},
+  living: {mat: new THREE.MeshStandardMaterial({map: tileTex('#e6dfd3', '#d3cabd', 2), roughness: .45}), ts: 1.6},
+  wet:    {mat: new THREE.MeshStandardMaterial({map: tileTex('#cfd6dd', '#9fa8b1', 4), roughness: .5}), ts: 1.2},
+  balcony:{mat: new THREE.MeshStandardMaterial({map: tileTex('#b9bcc0', '#8e9296', 4), roughness: .8}), ts: 1.2},
+};
+
+const M = (c, r = .8, m = 0) => new THREE.MeshStandardMaterial({color: c, roughness: r, metalness: m});
+const mat = {
+  wall: M(0xf2ede5, .95), cap: M(0x2b2b2b, .9),
+  glass: new THREE.MeshPhysicalMaterial({color: 0xbfe0ef, roughness: .05, transparent: true, opacity: .28, depthWrite: false}),
+  wood: M(0xb89670, .75), oak: M(0xd6b993, .7), walnut: M(0x3e342c, .7),
+  white: M(0xf5f2ec, .6), cab: M(0xece7de, .6), kcab: M(0xcfb08a, .7), counter: M(0xd9d3c8, .4),
+  fabric: M(0xcfc2ad, 1), fabricL: M(0xdcd1bf, 1), beige: M(0xc9bba3, 1), sage: M(0x9ba58d, 1), clay: M(0xb7876a, 1),
+  duvet: M(0xebe5da, 1), duvet2: M(0xc6b79f, 1), duvet3: M(0xa9b29c, 1), pillow: M(0xf6f2ea, 1),
+  dark: M(0x2c2a27, .55), screen: M(0x0d0d0f, .2, .2), steel: M(0xc9cdd1, .25, .8),
+  porcelain: M(0xffffff, .2), rug: M(0xd9d0c0, 1), rug2: M(0xbfae94, 1),
+  green: M(0x4e8a4a, .8), green2: M(0x3f7a40, .8), pot: M(0xdcd5c8, .6), pot2: M(0x3b3835, .6), lamp: M(0xfff3d6, .6),
+  paper: new THREE.MeshStandardMaterial({color: 0xfaf4e8, emissive: 0xffe2b0, emissiveIntensity: .55, roughness: 1}),
+  water: M(0xd7ecf5, .1),
+  rust: M(0xa9532f, 1), ochre: M(0xc8942e, 1), olive: M(0x56653f, 1), indigo: M(0x2f4064, 1), forest: M(0x3d5a45, 1),
+  cognac: M(0x8a4a28, .6), terracotta: M(0xb4643f, .8), teal: M(0x3f6f68, .35),
+};
+
+const floorG = new THREE.Group(), wallG = new THREE.Group(), furn = new THREE.Group(), labelG = new THREE.Group();
+scene.add(floorG, wallG, furn, labelG);
+
+// ---------- 幾何工具 ----------
+function B(x1, y1, x2, y2, h0, h1, m, parent = furn, shadow = true) {
+  const [a, b] = [Math.min(x1, x2), Math.max(x1, x2)], [c, d] = [Math.min(y1, y2), Math.max(y1, y2)];
+  const g = new THREE.BoxGeometry((b - a) * MM, (h1 - h0) * MM, (d - c) * MM);
+  const me = new THREE.Mesh(g, m);
+  me.position.set(cx((a + b) / 2), (h0 + h1) / 2 * MM, cz((c + d) / 2));
+  me.castShadow = shadow; me.receiveShadow = true;
+  parent.add(me); return me;
+}
+function CY(xc, yc, r, h0, h1, m, sx = 1, sz = 1, seg = 28) {
+  const me = new THREE.Mesh(new THREE.CylinderGeometry(r * MM, r * MM, (h1 - h0) * MM, seg), m);
+  me.scale.set(sx, 1, sz); me.position.set(cx(xc), (h0 + h1) / 2 * MM, cz(yc));
+  me.castShadow = true; me.receiveShadow = true; furn.add(me); return me;
+}
+function SP(xc, yc, h, r, m) {
+  const me = new THREE.Mesh(new THREE.SphereGeometry(r * MM, 20, 14), m);
+  me.position.set(cx(xc), h * MM, cz(yc)); me.castShadow = true; furn.add(me); return me;
+}
+// 家具局部座標：dir 為「背面／床頭」所在方向；u = 從背面往前的距離，v = 橫向距離
+function F(x1, y1, x2, y2, dir) {
+  const hz = dir === 'W' || dir === 'E';
+  const L = hz ? x2 - x1 : y2 - y1, W = hz ? y2 - y1 : x2 - x1;
+  const map = (u0, u1, v0, v1) => dir === 'W' ? [x1 + u0, y1 + v0, x1 + u1, y1 + v1]
+    : dir === 'E' ? [x2 - u1, y1 + v0, x2 - u0, y1 + v1]
+    : dir === 'N' ? [x1 + v0, y1 + u0, x1 + v1, y1 + u1]
+    : [x1 + v0, y2 - u1, x1 + v1, y2 - u0];
+  const pt = (u, v) => { const r = map(u, u, v, v); return [r[0], r[1]]; };
+  return {
+    L, W, pt,
+    box: (u0, u1, v0, v1, h0, h1, m) => { const r = map(u0, u1, v0, v1); return B(r[0], r[1], r[2], r[3], h0, h1, m); },
+    cyl: (u, v, r, h0, h1, m, su = 1, sv = 1) => { const [x, y] = pt(u, v); return hz ? CY(x, y, r, h0, h1, m, su, sv) : CY(x, y, r, h0, h1, m, sv, su); },
+  };
+}
+
+// ---------- 地板 ----------
+function floor(x1, y1, x2, y2, kind) {
+  const {mat: m, ts} = FLOOR[kind];
+  const g = new THREE.PlaneGeometry((x2 - x1) * MM, (y2 - y1) * MM);
+  g.rotateX(-Math.PI / 2); g.translate(cx((x1 + x2) / 2), 0.001, cz((y1 + y2) / 2));
+  const p = g.attributes.position, uv = g.attributes.uv;
+  for (let i = 0; i < p.count; i++) uv.setXY(i, p.getX(i) / ts, -p.getZ(i) / ts);
+  const me = new THREE.Mesh(g, m); me.receiveShadow = true; floorG.add(me);
+}
+floor(4850, 150, 9050, 2300, 'living'); // 廚房：暖灰石材磚
+[[3170, 1900, 4850, 2300], [3170, 2300, 9700, 4925], [3170, 4925, 6550, 8850]].forEach(r => floor(...r, 'wood'));
+floor(150, 4400, 3050, 8850, 'wood');      // 次臥
+floor(1650, 1900, 3050, 4300, 'wood');     // 更衣間
+floor(6650, 5025, 8652, 8850, 'wood');     // 書房兼臥室
+floor(8752, 5025, 11352, 8850, 'wood');    // 主臥
+floor(150, 1900, 1550, 4300, 'wet');       // 浴室
+floor(9200, 150, 11200, 2300, 'wet');      // 洗衣間
+floor(9800, 2450, 11200, 4925, 'wet');     // 主浴
+floor(3170, 9000, 6155, 10080, 'balcony'); // 陽台
+
+// ---------- 牆 [x1,y1,x2,y2,[開口: a,b,下緣,上緣,是否玻璃]] ----------
+const H = 2800;
+const WALLS = [
+  [4700, 0, 11350, 150, []],
+  [4700, 150, 4850, 1900, []],
+  [0, 1750, 4700, 1900, [[3200, 4230, 0, 2200, 0]]],                 // 北牆＋入口門
+  [0, 1900, 150, 8850, []],
+  [0, 8850, 11502, 9000, [[930, 2430, 1200, 2350, 1], [3590, 5680, 150, 2350, 1], [6780, 8310, 600, 2350, 1], [8820, 10620, 600, 2350, 1]]],
+  [11200, 150, 11350, 4925, [[3350, 3850, 1500, 2250, 1]]],           // 東牆（主浴窗）
+  [11352, 5025, 11502, 8850, []],
+  [11352, 8850, 11502, 9000, []],
+  [1550, 1900, 1650, 4300, []],
+  [3050, 1900, 3170, 8850, [[4450, 5350, 0, 2200, 0]]],               // 次臥門
+  [150, 4300, 3050, 4400, [[750, 1550, 0, 2100, 0], [1700, 2500, 0, 2100, 0]]],
+  [9050, 150, 9200, 2300, [[1000, 1850, 0, 2160, 0]]],                // 洗衣間門
+  [6440, 2300, 9050, 2400, []],
+  [9050, 2300, 11200, 2450, []],
+  [9700, 2450, 9800, 4925, [[4100, 4900, 0, 2100, 0]]],               // 主浴門
+  [6550, 4925, 11502, 5025, [[6700, 7600, 0, 2200, 0], [8800, 9600, 0, 2200, 0]]],
+  [6550, 5025, 6650, 8850, []],
+  [8652, 5025, 8752, 8850, []],
+  // 結構柱／管道間
+  [6050, 150, 6750, 800, []],
+  [1650, 1900, 2000, 2790, []],
+  [10830, 2450, 11200, 3350, []],
+  // 陽台
+  [2500, 9000, 3170, 10155, []],
+  [6076, 9000, 6650, 9680, []],
+];
+// 前陽台：無女兒牆，為半高玻璃牆（高 1.1 m，上方開放）
+const RAILS = [[3170, 10060, 6230, 10100], [6135, 9680, 6175, 10100]];
+const WM = [mat.wall, mat.wall, mat.cap, mat.wall, mat.wall, mat.wall];
+const ACC_M = {};
+function buildWalls(Hc) {
+  wallG.children.slice().forEach(c => { c.geometry.dispose(); wallG.remove(c); });
+  for (const [x1, y1, x2, y2, ops] of WALLS) {
+    const hz = (x2 - x1) >= (y2 - y1), s = hz ? x1 : y1, e = hz ? x2 : y2;
+    const seg = (a, b, h0, h1, m, shadow = true, thin = false) => {
+      if (b - a <= 0.5) return; h1 = Math.min(h1, Hc); if (h1 - h0 <= 1) return;
+      if (thin) { const mid = hz ? (y1 + y2) / 2 : (x1 + x2) / 2; hz ? B(a, mid - 8, b, mid + 8, h0, h1, m, wallG, false) : B(mid - 8, a, mid + 8, b, h0, h1, m, wallG, false); return; }
+      hz ? B(a, y1, b, y2, h0, h1, m, wallG, shadow) : B(x1, a, x2, b, h0, h1, m, wallG, shadow);
+    };
+    let cur = s;
+    for (const [a, b, bot, top, gl] of [...ops].sort((p, q) => p[0] - q[0])) {
+      seg(cur, a, 0, H, WM); seg(a, b, 0, bot, WM); seg(a, b, top, H, WM);
+      if (gl) seg(a, b, bot, top, mat.glass, false, true);
+      cur = b;
+    }
+    seg(cur, e, 0, H, WM);
+  }
+  const ACCENT = [[150, 4400, 158, 8850, 0, 2800, 0x8f9c7e],      // 主臥床頭牆：鼠尾草綠
+                  [6750, 150, 9050, 158, 900, 1500, 0x3f6f68]];   // 廚房壁磚：深青綠
+  for (const [x1, y1, x2, y2, h0, h1, c] of ACCENT) {
+    if (h0 >= Hc) continue;
+    B(x1, y1, x2, y2, h0, Math.min(h1, Hc), ACC_M[c] ||= M(c, c === 0x3f6f68 ? .3 : .95), wallG, false);
+  }
+  for (const [x1, y1, x2, y2] of RAILS) {
+    const hz = (x2 - x1) > (y2 - y1);
+    B(x1, y1, x2, y2, 30, 1060, mat.glass, wallG, false);                       // 玻璃
+    hz ? B(x1, y1 - 15, x2, y2 + 15, 1060, 1100, mat.steel, wallG) : B(x1 - 15, y1, x2 + 15, y2, 1060, 1100, mat.steel, wallG); // 扶手
+    hz ? B(x1, y1 - 10, x2, y2 + 10, 0, 30, mat.steel, wallG) : B(x1 - 10, y1, x2 + 10, y2, 0, 30, mat.steel, wallG);           // 底框
+  }
+}
+buildWalls(H);
+
+// ---------- 家具元件 ----------
+function bed(x1, y1, x2, y2, head, dv, acc) {
+  const f = F(x1, y1, x2, y2, head), {L, W} = f;
+  f.box(0, 40, -60, W + 60, 0, 300, mat.oak);                       // 床頭底板
+  for (let v = -40; v < W + 50; v += 70) f.box(40, 70, v, v + 40, 300, 850, mat.oak); // 格柵
+  f.box(40, L + 60, -60, W + 60, 100, 220, mat.oak);                 // 平台
+  f.box(140, L - 40, 60, W - 60, 0, 100, mat.walnut);                // 內縮底座
+  f.box(80, L, 0, W, 220, 420, mat.white);
+  f.box(L * .38, L + 10, -20, W + 20, 260, 455, dv);
+  if (W > 1200) { f.box(110, 500, W * .07, W * .47, 420, 550, mat.pillow); f.box(110, 500, W * .53, W * .93, 420, 550, mat.pillow); f.box(380, 520, W * .3, W * .7, 420, 600, mat.sage); }
+  else f.box(110, 470, W * .15, W * .85, 420, 540, mat.pillow);
+  if (acc) { f.box(L * .74, L * .9, -25, W + 25, 250, 462, acc); f.box(380, 500, W * .38, W * .62, 420, 580, acc); }
+}
+function sofa(x1, y1, x2, y2, back) {
+  const f = F(x1, y1, x2, y2, back), {L, W} = f;
+  [[70, 70], [70, W - 70], [L - 70, 70], [L - 70, W - 70]].forEach(([u, v]) => { f.cyl(u, v, 22, 0, 150, mat.oak, 1, 1); });
+  f.box(0, L, 0, W, 150, 330, mat.fabric);
+  f.box(0, 200, 0, W, 150, 720, mat.fabric);
+  f.box(0, L, 0, 140, 150, 520, mat.fabric); f.box(0, L, W - 140, W, 150, 520, mat.fabric);
+  const n = 3, sw = (W - 280) / n;
+  for (let i = 0; i < n; i++) {
+    f.box(200, L - 10, 140 + i * sw + 6, 140 + (i + 1) * sw - 6, 330, 470, mat.fabricL);
+    f.box(200, 360, 140 + i * sw + 6, 140 + (i + 1) * sw - 6, 470, 740, mat.fabricL);
+  }
+  f.box(360, 470, 200, 600, 470, 790, mat.rust); f.box(360, 470, 620, 960, 470, 760, mat.ochre); f.box(360, 470, W - 600, W - 200, 470, 790, mat.forest);
+  f.box(150, L + 5, W * .55, W * .75, 330, 480, mat.indigo);         // 披毯
+}
+function table(x1, y1, x2, y2, h, top, leg, inset = 50) {
+  B(x1, y1, x2, y2, h - 40, h, top);
+  [[x1 + inset, y1 + inset], [x2 - inset, y1 + inset], [x1 + inset, y2 - inset], [x2 - inset, y2 - inset]]
+    .forEach(([x, y]) => B(x - 25, y - 25, x + 25, y + 25, 0, h - 40, leg));
+}
+function chair(x1, y1, x2, y2, back, m = mat.oak) {
+  const f = F(x1, y1, x2, y2, back), {L, W} = f;
+  f.box(20, L, 0, W, 420, 445, m);
+  f.box(40, L - 20, 20, W - 20, 445, 470, m === mat.dark ? mat.fabricL : mat.ochre);
+  [[L - 35, 35], [L - 35, W - 35]].forEach(([u, v]) => f.cyl(u, v, 17, 0, 420, m));
+  [[35, 35], [35, W - 35]].forEach(([u, v]) => f.cyl(u, v, 18, 0, 800, m));
+  f.box(15, 55, 0, W, 680, 800, m);                                  // 弧形靠背橫木
+  for (let v = W * .3; v < W * .75; v += W * .2) f.box(25, 45, v - 8, v + 8, 445, 680, m);
+}
+function wardrobe(x1, y1, x2, y2, back, doors) {
+  const f = F(x1, y1, x2, y2, back), {L, W} = f;
+  f.box(0, L, 0, W, 0, 2200, mat.oak);
+  for (let i = 1; i < doors; i++) f.box(L - 2, L + 4, W * i / doors - 4, W * i / doors + 4, 40, 2160, mat.walnut);
+  for (let i = 0; i < doors; i++) { const v = W * (i + .5) / doors + (i % 2 ? -1 : 1) * (W / doors * .35); f.box(L, L + 20, v - 8, v + 8, 950, 1250, mat.dark); }
+}
+function nightstand(x1, y1, x2, y2) {
+  B(x1, y1, x2, y2, 0, 550, mat.oak);
+  const xc = (x1 + x2) / 2, yc = (y1 + y2) / 2;
+  CY(xc, yc, 60, 550, 820, mat.steel, 1, 1, 16);
+  CY(xc, yc, 130, 820, 1020, mat.lamp, 1, 1, 24);
+}
+function plant(xc, yc, s = 500, base = 0) {
+  CY(xc, yc, s * .3, base, base + s * .6, s > 300 ? mat.pot : mat.pot2);
+  SP(xc, yc, base + s * 1.05, s * .45, mat.green);
+  SP(xc + s * .2, yc - s * .15, base + s * 1.35, s * .32, mat.green2);
+  SP(xc - s * .2, yc + s * .1, base + s * 1.3, s * .3, mat.green);
+}
+function tallPlant(xc, yc, s = 1600) { // 高型植栽（如琴葉榕）
+  CY(xc, yc, 170, 0, 380, mat.pot2);
+  CY(xc, yc, 18, 380, s * .55, mat.walnut, 1, 1, 8);
+  SP(xc, yc, s * .7, 260, mat.green2);
+  SP(xc + 120, yc - 80, s * .85, 230, mat.green);
+  SP(xc - 110, yc + 90, s * .95, 210, mat.green2);
+  SP(xc, yc, s, 180, mat.green);
+}
+function vanity(x1, y1, x2, y2, back) {
+  const f = F(x1, y1, x2, y2, back), {L, W} = f;
+  f.box(0, L, 0, W, 150, 800, mat.oak);
+  f.box(0, L + 10, -5, W + 5, 800, 840, mat.white);
+  f.cyl(L * .55, W / 2, Math.min(W, L) * .3, 840, 900, mat.porcelain, 1.15, 1);
+  f.cyl(60, W / 2, 15, 840, 1000, mat.steel);
+  f.box(0, 20, W * .1, W * .9, 1150, 1850, mat.water);
+}
+function toilet(x1, y1, x2, y2, back) {
+  const f = F(x1, y1, x2, y2, back), {L, W} = f;
+  f.box(0, 200, W * .08, W * .92, 380, 780, mat.porcelain);
+  f.cyl(200 + (L - 200) / 2, W / 2, (L - 200) / 2, 0, 400, mat.porcelain, 1, (W * .85) / (L - 200));
+  f.box(0, 200, W * .08, W * .92, 0, 380, mat.porcelain);
+}
+function bathtub(x1, y1, x2, y2) {
+  B(x1, y1, x2, y2, 0, 420, mat.porcelain);
+  B(x1, y1, x2, y1 + 90, 420, 560, mat.porcelain); B(x1, y2 - 90, x2, y2, 420, 560, mat.porcelain);
+  B(x1, y1, x1 + 90, y2, 420, 560, mat.porcelain); B(x2 - 90, y1, x2, y2, 420, 560, mat.porcelain);
+  B(x1 + 90, y1 + 90, x2 - 90, y2 - 90, 420, 430, mat.water);
+}
+function counter(x1, y1, x2, y2) {
+  B(x1, y1, x2, y2, 80, 860, mat.kcab);
+  B(x1, y1, x2, y2, 0, 80, mat.dark);
+  B(x1 - 5, y1 - 5, x2 + 5, y2 + 5, 860, 900, mat.counter);
+}
+
+// ---------- 擺放家具（位置依 Layout Plan，單位 mm） ----------
+// 廚房
+counter(4850, 150, 6050, 750);
+counter(4850, 750, 5450, 1900);
+counter(6750, 150, 9050, 750);
+B(7250, 300, 7750, 650, 880, 905, mat.steel);                       // 水槽
+CY(7500, 250, 15, 900, 1200, mat.steel, 1, 1, 12);
+B(7950, 250, 8650, 700, 900, 915, mat.dark);                        // 爐台
+[[8130, 380], [8470, 380], [8130, 580], [8470, 580]].forEach(([x, y]) => CY(x, y, 70, 915, 922, mat.steel));
+B(6750, 150, 9050, 500, 1500, 2200, mat.cab);                       // 吊櫃
+B(7950, 150, 8650, 600, 1350, 1500, mat.steel);                     // 抽油煙機
+counter(6530, 1670, 7420, 2300);                                    // 中島
+// 餐廳
+table(5250, 3250, 7650, 4150, 750, mat.oak, mat.walnut, 120);   // 六人長餐桌 240×90 cm，往西側開放區延伸
+[5650, 6450, 7250].forEach(x => { chair(x - 220, 2830, x + 220, 3250, 'N'); chair(x - 220, 4150, x + 220, 4570, 'S'); });
+B(5350, 3420, 7550, 3980, 750, 754, mat.beige);                     // 桌旗
+// 玄關：入口門向內開、鉸鍊在西側，門片打開時沿西牆約佔 y 1900–2930，故鞋櫃從 y 3000 起
+B(3300, 1920, 4150, 2500, 0, 10, mat.indigo);                         // 落塵地墊
+B(3170, 3000, 3550, 3900, 150, 2200, mat.oak);                      // 高鞋櫃（下方懸空 15 cm 放拖鞋）
+B(3548, 3448, 3555, 3452, 160, 2190, mat.walnut);
+B(3550, 3200, 3570, 3260, 950, 1250, mat.steel); B(3550, 3640, 3570, 3700, 950, 1250, mat.steel);
+B(3170, 3900, 3550, 4380, 0, 420, mat.oak);                         // 穿鞋椅
+B(3180, 3920, 3540, 4360, 420, 470, mat.beige);
+B(3170, 3950, 3185, 4330, 600, 1900, mat.water);                    // 全身鏡
+B(3170, 3920, 3220, 4360, 1700, 1720, mat.steel);                   // 掛衣桿
+// 客廳
+// 羊毛地毯（無茶几）
+{ const rt = canvasTex((g, sz) => { g.fillStyle = '#ddd4c4'; g.fillRect(0, 0, sz, sz);
+    for (let i = 0; i < 4000; i++) { g.fillStyle = `rgba(${Math.random() < .5 ? '120,100,80' : '255,250,240'},.06)`; g.fillRect(rnd(0, sz), rnd(0, sz), 3, 3); }
+    g.strokeStyle = '#2f4064'; g.lineWidth = 14; g.strokeRect(28, 28, sz - 56, sz - 56); g.strokeStyle = '#a9532f'; g.lineWidth = 5; g.strokeRect(56, 56, sz - 112, sz - 112);
+    g.fillStyle = 'rgba(200,148,46,.55)'; for (let i = 0; i < 3; i++) g.fillRect(90, sz * (.38 + i * .1), sz - 180, 8); });
+  rt.wrapS = rt.wrapT = THREE.ClampToEdgeWrapping;
+  B(3950, 5650, 5750, 8250, 0, 14, new THREE.MeshStandardMaterial({map: rt, roughness: 1}), furn, false); }
+sofa(3200, 5840, 4060, 8360, 'W');
+CY(3640, 5560, 230, 480, 510, mat.oak); CY(3640, 5560, 25, 0, 480, mat.walnut, 1, 1, 12); CY(3640, 5560, 180, 0, 20, mat.walnut); // 圓邊几
+CY(3640, 5560, 90, 510, 700, mat.pot);                                                      // 陶瓷花器
+// 北歐休閒單椅（面向北）
+{ const f = F(4900, 7950, 5650, 8700, 'S');
+  [[60, 60], [60, f.W - 60], [f.L - 60, 60], [f.L - 60, f.W - 60]].forEach(([u, v]) => f.cyl(u, v, 20, 0, 260, mat.oak));
+  f.box(0, f.L, 40, f.W - 40, 260, 300, mat.oak); f.box(60, f.L - 20, 80, f.W - 80, 300, 420, mat.cognac);
+  f.box(0, 150, 60, f.W - 60, 300, 820, mat.cognac); f.box(0, f.L - 80, 0, 60, 260, 560, mat.oak); f.box(0, f.L - 80, f.W - 60, f.W, 260, 560, mat.oak);
+  f.box(150, 260, 260, f.W - 260, 420, 640, mat.rust); }
+B(5830, 6190, 6220, 8560, 140, 480, mat.oak);                       // 懸浮電視櫃
+B(5900, 6260, 6150, 8490, 0, 140, mat.walnut);
+for (let y = 6260; y < 8500; y += 90) B(5818, y, 5830, y + 45, 160, 460, mat.oak);
+B(6060, 6450, 6110, 7750, 780, 1560, mat.screen);                   // 電視
+B(6110, 6950, 6180, 7250, 450, 800, mat.dark);
+plant(6250, 5850, 550);
+// 主臥（西側）：衣物收進更衣間，拿掉兩座衣櫃與書桌，留出空間
+bed(180, 6500, 2140, 8280, 'W', mat.duvet, mat.olive);
+nightstand(180, 6000, 620, 6440); nightstand(180, 8340, 620, 8780);
+B(1100, 6250, 2700, 8550, 0, 10, mat.terracotta);                  // 床尾地毯
+// 主人椅（面向西）＋小邊几＋落地燈
+{ const f = F(2300, 5650, 2980, 6330, 'E');
+  [[60, 60], [60, f.W - 60], [f.L - 60, 60], [f.L - 60, f.W - 60]].forEach(([u, v]) => f.cyl(u, v, 18, 0, 280, mat.oak));
+  f.box(0, f.L, 30, f.W - 30, 280, 320, mat.oak); f.box(50, f.L - 20, 60, f.W - 60, 320, 440, mat.forest);
+  f.box(0, 140, 50, f.W - 50, 320, 860, mat.forest); f.box(0, f.L - 100, 0, 50, 280, 580, mat.oak); f.box(0, f.L - 100, f.W - 50, f.W, 280, 580, mat.oak);
+  f.box(140, 240, 220, f.W - 220, 440, 640, mat.fabricL); }
+CY(2640, 6560, 190, 480, 505, mat.oak); CY(2640, 6560, 22, 0, 480, mat.walnut, 1, 1, 12); CY(2640, 6560, 150, 0, 18, mat.walnut);
+CY(2860, 5520, 130, 0, 20, mat.walnut); CY(2860, 5520, 12, 20, 1450, mat.walnut, 1, 1, 8); CY(2860, 5520, 170, 1450, 1680, mat.lamp); // 落地燈
+// 浴室（次臥）
+bathtub(150, 1900, 1550, 2550);
+toilet(150, 2930, 850, 3330, 'W');
+vanity(150, 3750, 700, 4280, 'W');
+// 儲藏室
+// 更衣間（原儲藏室）：門向內開、掃過 x 1700–2500 / y 3500–4300，該範圍保持淨空
+const clothM = [0x2f3e4e, 0xd8d2c4, 0x8a4f3d, 0x6b7b5e, 0xf0eee8, 0x40404a, 0xa9b8c9, 0xc49a6c].map(c => M(c, .95));
+function hangCloset(x1, y1, x2, y2, back, bays) {
+  const f = F(x1, y1, x2, y2, back), {L, W} = f;
+  for (let i = 0; i <= bays; i++) { const v = Math.min(W - 20, i * W / bays); f.box(0, L, v, v + 20, 0, 2200, mat.oak); }
+  f.box(0, 20, 0, W, 0, 2200, mat.oak);                       // 背板
+  f.box(0, L, 0, W, 1950, 1975, mat.oak); f.box(0, L, 0, W, 2180, 2200, mat.oak);
+  f.box(0, L, 0, W, 150, 170, mat.oak);                       // 鞋層
+  f.box(L / 2 - 10, L / 2 + 10, 20, W - 20, 1780, 1800, mat.steel); // 吊衣桿
+  let k = 0;
+  for (let v = 40; v < W - 60; v += 75) f.box(L / 2 - 210, L / 2 + 210, v, v + 35, 950 + ((k * 37) % 5) * 90, 1770, clothM[k++ % clothM.length]);
+  for (let v = 60; v < W - 200; v += 260) f.box(L * .3, L * .9, v, v + 200, 170, 280, mat.dark); // 鞋
+  for (let v = 60; v < W - 300; v += 420) f.box(L * .2, L * .9, v, v + 330, 1975, 2150, mat.beige); // 收納盒
+}
+hangCloset(2550, 1900, 3050, 4300, 'E', 3);                   // 東側整面吊掛衣櫃
+B(2000, 1900, 2550, 2350, 0, 2200, mat.oak);                  // 北側層板櫃
+[400, 800, 1200, 1600].forEach(h => B(2010, 2330, 2540, 2350, h, h + 20, mat.walnut));
+[[450, 0], [850, 1], [1250, 3]].forEach(([h, c]) => B(2060, 1950, 2490, 2300, h + 20, h + 300, clothM[c])); // 摺疊衣物
+B(1650, 2790, 2100, 3450, 0, 900, mat.oak);                   // 西側抽屜櫃
+[250, 500, 750].forEach(h => B(2100, 2810, 2108, 3430, h - 4, h + 4, mat.walnut));
+B(1650, 2850, 1665, 3390, 1100, 2000, mat.water);             // 牆面鏡
+// 洗衣間
+counter(9200, 1900, 10550, 2300);
+B(9500, 1980, 9950, 2250, 880, 905, mat.steel);
+B(10600, 1450, 11180, 2050, 0, 850, mat.white);                     // 洗衣機
+{ const me = new THREE.Mesh(new THREE.CylinderGeometry(.19, .19, .03, 28), mat.dark); me.rotation.z = Math.PI / 2; me.position.set(cx(10595), .45, cz(1750)); furn.add(me); }
+// 主浴
+vanity(9850, 2450, 10800, 3000, 'N');
+B(9800, 3350, 11200, 4050, 0, 40, mat.white);                       // 淋浴盤
+B(9800, 4040, 10600, 4060, 40, 2000, mat.glass).castShadow = false; // 淋浴玻璃
+CY(10600, 3400, 90, 1950, 1970, mat.steel);
+toilet(10750, 4150, 11200, 4600, 'E');
+// 書房兼臥室
+bed(6650, 7970, 8652, 8850, 'E', mat.duvet3, mat.ochre);
+table(8000, 6960, 8640, 7870, 750, mat.oak, mat.walnut, 40);
+chair(7400, 7200, 7850, 7650, 'W', mat.dark);
+// 主臥
+bed(8752, 6630, 10852, 8210, 'W', mat.duvet2, mat.indigo);
+nightstand(8760, 6150, 9200, 6600); nightstand(8760, 8240, 9200, 8690);
+wardrobe(9690, 5025, 11352, 5620, 'N', 3);
+B(9300, 6500, 11000, 8350, 0, 10, mat.rug2);
+// 陽台
+plant(5600, 9450, 650);
+// ---------- 加強植栽 ----------
+tallPlant(3420, 8600, 1700);   // 客廳：沙發旁、落地窗邊
+plant(6370, 8650, 450);        // 客廳：電視櫃南端
+plant(4600, 2150, 450); furn.children.slice(-4)[0].material = mat.terracotta;        // 玄關：進門右側
+tallPlant(9450, 2700, 1500);   // 餐廳：通往主浴走道轉角
+plant(6450, 3700, 220, 754);   // 餐桌中央小盆栽
+plant(6750, 1850, 220, 900);   // 中島檯面香草
+plant(6950, 1850, 200, 900);
+plant(11120, 8640, 550);       // 主臥：窗邊角落
+plant(8460, 5250, 420);        // 書房：東北角
+plant(2850, 8620, 550);        // 次臥：窗邊角落
+plant(10050, 2620, 180, 840);  // 主浴洗手台
+plant(450, 4215, 180, 840);    // 浴室洗手台
+plant(3400, 9780, 500);        // 陽台西側
+tallPlant(5880, 9820, 1400);   // 陽台東側
+
+// ---------- 掛畫（原創抽象圖樣，程式隨機產生） ----------
+const artG = new THREE.Group(); scene.add(artG);
+const PAL = [['#efe9df', '#a9532f', '#2f4064', '#c8942e', '#56653f'], ['#f3efe8', '#2f2d2b', '#b4643f', '#3f6f68', '#c8942e'],
+             ['#ebe5da', '#3d5a45', '#c8942e', '#3d3b38', '#a9532f'], ['#f2ece3', '#2f4064', '#b4643f', '#8a9a7b', '#e2d8c9']];
+function artTex(style, pal, aspect) {
+  const W = 512, Hh = Math.max(64, Math.round(512 * aspect));
+  const c = document.createElement('canvas'); c.width = W; c.height = Hh; const g = c.getContext('2d');
+  const col = () => pal[1 + Math.floor(Math.random() * (pal.length - 1))];
+  g.fillStyle = pal[0]; g.fillRect(0, 0, W, Hh);
+  if (style === 'blocks') {
+    for (let i = 0; i < 5; i++) { g.globalAlpha = rnd(.6, .95); g.fillStyle = col(); g.fillRect(rnd(0, W * .6), rnd(0, Hh * .6), rnd(W * .2, W * .5), rnd(Hh * .2, Hh * .5)); }
+  } else if (style === 'circles') {
+    for (let i = 0; i < 4; i++) { g.globalAlpha = rnd(.55, .9); g.fillStyle = col(); g.beginPath(); g.arc(rnd(W * .2, W * .8), rnd(Hh * .2, Hh * .8), rnd(40, Math.min(W, Hh) * .35), 0, Math.PI * 2); g.fill(); }
+  } else if (style === 'waves') {
+    for (let i = 0; i < 4; i++) {
+      g.globalAlpha = .85; g.fillStyle = pal[1 + i % (pal.length - 1)];
+      const base = Hh * (.35 + i * .17), amp = rnd(10, 30), fr = rnd(1, 3), ph = rnd(0, 6);
+      g.beginPath(); g.moveTo(0, Hh);
+      for (let x = 0; x <= W; x += 8) g.lineTo(x, base + Math.sin(x / W * Math.PI * fr + ph) * amp);
+      g.lineTo(W, Hh); g.fill();
+    }
+    g.globalAlpha = .9; g.fillStyle = pal[4]; g.beginPath(); g.arc(W * .72, Hh * .22, Math.min(W, Hh) * .09, 0, Math.PI * 2); g.fill();
+  } else {
+    g.lineWidth = 3;
+    for (let i = 0; i < 9; i++) { g.globalAlpha = .7; g.strokeStyle = col(); g.beginPath(); const x = rnd(0, W); g.moveTo(x, 0); g.lineTo(x + rnd(-80, 80), Hh); g.stroke(); }
+    g.lineWidth = 14; for (let i = 0; i < 3; i++) { g.globalAlpha = .85; g.strokeStyle = col(); g.beginPath(); g.arc(rnd(0, W), rnd(0, Hh), rnd(60, 180), rnd(0, 3), rnd(3, 6)); g.stroke(); }
+  }
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+// fx,fy：畫所在牆面（平面圖 mm）；face：畫面朝向；hc：畫中心高度
+function art(fx, fy, w, h, hc, face, style, pal, frame = mat.walnut) {
+  const d = 35, h0 = hc - h / 2, h1 = hc + h / 2;
+  const r = face === 'E' ? [fx, fy - w / 2, fx + d, fy + w / 2] : face === 'W' ? [fx - d, fy - w / 2, fx, fy + w / 2]
+          : face === 'S' ? [fx - w / 2, fy, fx + w / 2, fy + d] : [fx - w / 2, fy - d, fx + w / 2, fy];
+  B(r[0], r[1], r[2], r[3], h0, h1, frame, artG);
+  const p = new THREE.Mesh(new THREE.PlaneGeometry((w - 80) * MM, (h - 80) * MM),
+    new THREE.MeshStandardMaterial({map: artTex(style, PAL[pal], (h - 80) / (w - 80)), roughness: .85}));
+  const o = d + 2;
+  if (face === 'E') { p.rotation.y = Math.PI / 2; p.position.set(cx(fx + o), hc * MM, cz(fy)); }
+  else if (face === 'W') { p.rotation.y = -Math.PI / 2; p.position.set(cx(fx - o), hc * MM, cz(fy)); }
+  else if (face === 'S') { p.position.set(cx(fx), hc * MM, cz(fy + o)); }
+  else { p.rotation.y = Math.PI; p.position.set(cx(fx), hc * MM, cz(fy - o)); }
+  artG.add(p);
+}
+art(3170, 7100, 1600, 800, 1550, 'E', 'blocks', 0);              // 客廳：沙發上方
+art(7400, 2400, 1200, 800, 1650, 'S', 'circles', 1, mat.oak);    // 餐廳：廚房隔間牆
+art(4465, 1900, 380, 500, 1500, 'S', 'lines', 2, mat.oak);       // 玄關：入口門旁
+art(8200, 4925, 800, 1000, 1550, 'N', 'waves', 2);               // 走道：書房與主臥門之間
+art(8752, 7420, 1200, 600, 1500, 'E', 'waves', 1, mat.oak);      // 主臥：床頭上方
+art(150, 7020, 500, 700, 1550, 'E', 'circles', 3, mat.oak);      // 次臥：床頭上方（雙聯）
+art(150, 7760, 500, 700, 1550, 'E', 'blocks', 3, mat.oak);
+art(8652, 7415, 700, 500, 1550, 'W', 'lines', 0);                // 書房：書桌上方
+
+function lantern(xc, yc, r, hc) {
+  const s = new THREE.Mesh(new THREE.SphereGeometry(r * MM, 28, 20), mat.paper); s.position.set(cx(xc), hc * MM, cz(yc)); artG.add(s);
+  const c = new THREE.Mesh(new THREE.CylinderGeometry(.004, .004, (H - hc - r) * MM, 6), mat.dark); c.position.set(cx(xc), (H + hc + r) / 2 * MM, cz(yc)); artG.add(c);
+}
+lantern(5850, 3700, 220, 1950); lantern(7050, 3700, 220, 1950);   // 餐桌上方
+lantern(4850, 6950, 320, 2150);                                   // 客廳
+lantern(1160, 7390, 260, 2150);                                   // 主臥
+lantern(9800, 7420, 240, 2150);                                   // 次臥
+
+// ---------- 標籤（面積取自平面圖標示） ----------
+const labels = [];
+function label(text, area, x, y, minor = false) {
+  const d = document.createElement('div'); d.className = 'lbl' + (minor ? ' minor' : '');
+  d.innerHTML = text + (area ? `<br><small>${area} m²</small>` : '');
+  const o = new CSS2DObject(d); o.position.set(cx(x), 1.2, cz(y)); labelG.add(o); labels.push(o);
+}
+label('客廳／餐廳／廚房', '', 4700, 4200);
+label('次臥', '', 10050, 6100);
+label('書房兼臥室', '', 7650, 6200);
+label('主臥', '', 1600, 7300);
+label('浴室', '', 850, 3300);
+label('更衣間', '', 2300, 3300);
+label('洗衣間', '', 10200, 900);
+label('主浴', '', 10400, 3700);
+label('陽台', '', 4600, 9600);
+label('廚房', '', 7000, 1300, true);
+label('入口／玄關', '', 3900, 2700, true);
+
+// ---------- 視角與互動 ----------
+const isTouch = matchMedia('(pointer: coarse)').matches;
+document.getElementById('hint').innerHTML = isTouch
+  ? '單指拖曳：旋轉　雙指捏合：縮放　雙指拖曳：平移'
+  : '左鍵拖曳：旋轉　右鍵拖曳：平移　滾輪：縮放';
+// 鳥瞰（公尺，場景座標）；室內人視角以平面圖 mm 定義：[相機 x,y,高度], [注視 x,y,高度]
+const P = (x, y, h) => [cx(x), h * MM, cz(y)];
+const views = {
+  se: [[8.5, 12.5, 13], [0, 0, 0.3]],
+  nw: [[-9, 12.5, -12], [0, 0, 0]],
+  ne: [[10, 12, -10], [0, 0, 0]],
+  sw: [[-10, 12, 11], [0, 0, 0]],
+  top: [[0, 21, 0.01], [0, 0, 0]],
+  south: [[0, 6.5, 15], [0, 0.6, 0]],
+  entry:   [P(3700, 2050, 1600), P(4600, 5200, 900)],
+  living:  [P(6250, 5300, 1650), P(3700, 7600, 800)],
+  dining:  [P(3500, 4600, 1650), P(7600, 3000, 800)],
+  kitchen: [P(9000, 3700, 1650), P(6600, 700, 900)],
+  master:  [P(2600, 5150, 1650), P(700, 7500, 600)],
+  closet:  [P(2300, 4250, 1650), P(2400, 2000, 1100)],
+  second:  [P(11100, 5900, 1650), P(9200, 7900, 600)],
+  study:   [P(6800, 5250, 1650), P(8200, 8100, 600)],
+  balcony: [P(4300, 8350, 1600), P(5000, 9800, 700)],
+};
+const interior = new Set(['entry', 'living', 'dining', 'kitchen', 'master', 'closet', 'second', 'study', 'balcony']);
+let anim = null;
+function setView(k, instant = false) {
+  const [p, t] = views[k];
+  const from = {p: camera.position.clone(), t: controls.target.clone()}, to = {p: new THREE.Vector3(...p), t: new THREE.Vector3(...t)};
+  controls.minDistance = interior.has(k) ? 0.3 : 2;
+  if (interior.has(k) && controls.autoRotate) { controls.autoRotate = false; spinBtn.classList.remove('on'); }
+  anim = instant ? null : {from, to, t0: performance.now(), dur: 900};
+  if (instant) { camera.position.copy(to.p); controls.target.copy(to.t); }
+  document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === k));
+  const btn = document.querySelector(`[data-view="${k}"]`); btn && btn.scrollIntoView({behavior: 'smooth', inline: 'center', block: 'nearest'});
+}
+function stepAnim(now) {
+  if (!anim) return;
+  let u = Math.min(1, (now - anim.t0) / anim.dur); const e = u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+  camera.position.lerpVectors(anim.from.p, anim.to.p, e); controls.target.lerpVectors(anim.from.t, anim.to.t, e);
+  if (u >= 1) anim = null;
+}
+controls.addEventListener('start', () => { anim = null; });
+const spinBtn = document.getElementById('spin');
+setView('se', true);
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
+const uiBox = document.getElementById('ui'), tg = document.getElementById('toggle');
+tg.onclick = () => { const c = uiBox.classList.toggle('collapsed'); tg.textContent = c ? '選項' : '收合'; };
+if (innerWidth < 640) { uiBox.classList.add('collapsed'); tg.textContent = '選項'; }
+document.querySelectorAll('[data-wall]').forEach(b => b.onclick = () => {
+  buildWalls(+b.dataset.wall);
+  artG.visible = +b.dataset.wall > 2000;
+  document.querySelectorAll('[data-wall]').forEach(x => x.classList.toggle('on', x === b));
+});
+spinBtn.onclick = () => { controls.autoRotate = !controls.autoRotate; spinBtn.classList.toggle('on', controls.autoRotate); };
+controls.autoRotateSpeed = 1.2;
+const lblBtn = document.getElementById('lblBtn');
+lblBtn.onclick = () => { const v = !lblBtn.classList.contains('on'); lblBtn.classList.toggle('on', v); labels.forEach(o => o.visible = v); };
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.fov = fovFor(); camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); labelRenderer.setSize(innerWidth, innerHeight);
+});
+renderer.setAnimationLoop((now) => { stepAnim(now); controls.update(); renderer.render(scene, camera); labelRenderer.render(scene, camera); });
+</script>
+<script>setTimeout(()=>{if(!document.querySelector('canvas'))document.getElementById('err').style.display='flex'},8000)</script>
+</body>
+</html>
