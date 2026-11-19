@@ -7,26 +7,19 @@
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#eceef1;font-family:-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
 canvas{touch-action:none;display:block}
-#ui{position:absolute;top:calc(10px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));background:rgba(255,255,255,.94);border-radius:12px;padding:10px 12px;box-shadow:0 2px 12px rgba(0,0,0,.12);font-size:13px;color:#222;width:250px;z-index:5;box-sizing:border-box}
-#ui .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
-#ui h1{font-size:15px;margin:0}
-#toggle{padding:4px 10px}
-#ui.collapsed .body{display:none}
-.grp{margin:9px 0 4px;font-size:11.5px;color:#666}
-.row{display:flex;flex-wrap:wrap;gap:6px}
 button{border:1px solid #c9ccd1;background:#fff;border-radius:8px;padding:6px 10px;font-size:12.5px;cursor:pointer;color:#222;font-family:inherit}
 button.on{background:#2b3a55;color:#fff;border-color:#2b3a55}
-.hint{color:#666;font-size:11.5px;line-height:1.55;margin-top:9px}
-#views{position:absolute;left:0;right:0;bottom:0;padding:8px calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;z-index:5;background:linear-gradient(to top,rgba(236,238,241,.95),rgba(236,238,241,0))}
+#dock{position:absolute;left:0;right:0;bottom:0;z-index:5}
+#views{padding:2px calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 #views::-webkit-scrollbar{display:none}
-#views .sep{flex:0 0 1px;background:#c9ccd1;margin:4px 2px}
+#views .sep{flex:0 0 1px;background:#b8bcc3;margin:4px 3px}
+#views .opt{background:#f4f1ea}
+#views .opt.on{background:#2b3a55}
 #views button{flex:0 0 auto;border-radius:18px;padding:8px 14px;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,.08);white-space:nowrap}
 .lbl{background:rgba(255,255,255,.88);padding:2px 7px;border-radius:5px;font-size:12px;color:#1d1d1f;text-align:center;white-space:nowrap;pointer-events:none;line-height:1.3;box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .lbl.minor{background:rgba(255,255,255,.7);font-size:11px}
 #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#a00;font-size:14px;padding:20px;text-align:center}
 @media (max-width:640px){
-  #ui{width:auto;max-width:calc(100vw - 20px);padding:8px 10px}
-  #ui h1{font-size:14px}
   button{padding:8px 12px;font-size:13px}
   .lbl{font-size:10.5px;padding:1px 5px}
   .lbl.minor{font-size:10px}
@@ -37,26 +30,10 @@ button.on{background:#2b3a55;color:#fff;border-color:#2b3a55}
 </script>
 </head>
 <body>
-<div id="ui">
-  <div class="head"><h1>3D 室內格局圖</h1><button id="toggle">收合</button></div>
-  <div class="body">
-    <div class="grp">牆面與顯示</div>
-    <div class="row">
-      <button data-wall="2800" class="on">全高牆</button>
-      <button data-wall="1100">半高牆</button>
-      <button id="lblBtn" class="on">房間標籤</button>
-      <button id="spin">自動旋轉</button>
-    </div>
-    <div class="hint" id="hint"></div>
-    <div class="hint">尺寸依 1:50 平面圖（11.502 × 10.155 m）；層高 2.8 m 由窗高標註推算。</div>
-  </div>
-</div>
+<div id="dock">
 <div id="views">
-  <button data-view="se">東南鳥瞰</button>
-  <button data-view="nw">西北鳥瞰</button>
-  <button data-view="ne">東北鳥瞰</button>
-  <button data-view="sw">西南鳥瞰</button>
   <button data-view="top">平面俯視</button>
+  <button data-view="north">北向立面</button>
   <button data-view="south">南向立面</button>
   <span class="sep"></span>
   <button data-view="entry">玄關</button>
@@ -68,6 +45,12 @@ button.on{background:#2b3a55;color:#fff;border-color:#2b3a55}
   <button data-view="second">次臥</button>
   <button data-view="study">書房</button>
   <button data-view="balcony">陽台</button>
+  <span class="sep"></span>
+  <button class="opt on" data-wall="2800">全高牆</button>
+  <button class="opt" data-wall="1100">半高牆</button>
+  <button class="opt on" id="lblBtn">房間標籤</button>
+  <button class="opt" id="spin">自動旋轉</button>
+</div>
 </div>
 <div id="err">3D 函式庫載入失敗，請確認網路後重新整理。</div>
 <script type="module">
@@ -173,8 +156,7 @@ const mat = {
   duvet: M(0xebe5da, 1), duvet2: M(0xc6b79f, 1), duvet3: M(0xa9b29c, 1), pillow: M(0xf6f2ea, 1),
   dark: M(0x2c2a27, .55), screen: M(0x0d0d0f, .2, .2), steel: M(0xc9cdd1, .25, .8),
   porcelain: M(0xffffff, .2), rug: M(0xd9d0c0, 1), rug2: M(0xbfae94, 1),
-  green: M(0x4e8a4a, .8), green2: M(0x3f7a40, .8), pot: M(0xdcd5c8, .6), pot2: M(0x3b3835, .6), lamp: M(0xfff3d6, .6),
-  paper: new THREE.MeshStandardMaterial({color: 0xfaf4e8, emissive: 0xffe2b0, emissiveIntensity: .55, roughness: 1}),
+  green: M(0x4e8a4a, .8), green2: M(0x3f7a40, .8), pot: M(0xdcd5c8, .6), pot2: M(0x3b3835, .6),
   water: M(0xd7ecf5, .1),
   rust: M(0xa9532f, 1), ochre: M(0xc8942e, 1), olive: M(0x56653f, 1), indigo: M(0x2f4064, 1), forest: M(0x3d5a45, 1),
   cognac: M(0x8a4a28, .6), terracotta: M(0xb4643f, .8), teal: M(0x3f6f68, .35),
@@ -352,8 +334,6 @@ function wardrobe(x1, y1, x2, y2, back, doors) {
 function nightstand(x1, y1, x2, y2) {
   B(x1, y1, x2, y2, 0, 550, mat.oak);
   const xc = (x1 + x2) / 2, yc = (y1 + y2) / 2;
-  CY(xc, yc, 60, 550, 820, mat.steel, 1, 1, 16);
-  CY(xc, yc, 130, 820, 1020, mat.lamp, 1, 1, 24);
 }
 function plant(xc, yc, s = 500, base = 0) {
   CY(xc, yc, s * .3, base, base + s * .6, s > 300 ? mat.pot : mat.pot2);
@@ -447,14 +427,13 @@ plant(6250, 5850, 550);
 bed(180, 6500, 2140, 8280, 'W', mat.duvet, mat.olive);
 nightstand(180, 6000, 620, 6440); nightstand(180, 8340, 620, 8780);
 B(1100, 6250, 2700, 8550, 0, 10, mat.terracotta);                  // 床尾地毯
-// 主人椅（面向西）＋小邊几＋落地燈
+// 主人椅（面向西）＋小邊几
 { const f = F(2300, 5650, 2980, 6330, 'E');
   [[60, 60], [60, f.W - 60], [f.L - 60, 60], [f.L - 60, f.W - 60]].forEach(([u, v]) => f.cyl(u, v, 18, 0, 280, mat.oak));
   f.box(0, f.L, 30, f.W - 30, 280, 320, mat.oak); f.box(50, f.L - 20, 60, f.W - 60, 320, 440, mat.forest);
   f.box(0, 140, 50, f.W - 50, 320, 860, mat.forest); f.box(0, f.L - 100, 0, 50, 280, 580, mat.oak); f.box(0, f.L - 100, f.W - 50, f.W, 280, 580, mat.oak);
   f.box(140, 240, 220, f.W - 220, 440, 640, mat.fabricL); }
 CY(2640, 6560, 190, 480, 505, mat.oak); CY(2640, 6560, 22, 0, 480, mat.walnut, 1, 1, 12); CY(2640, 6560, 150, 0, 18, mat.walnut);
-CY(2860, 5520, 130, 0, 20, mat.walnut); CY(2860, 5520, 12, 20, 1450, mat.walnut, 1, 1, 8); CY(2860, 5520, 170, 1450, 1680, mat.lamp); // 落地燈
 // 浴室（次臥）
 bathtub(150, 1900, 1550, 2550);
 toilet(150, 2930, 850, 3330, 'W');
@@ -496,6 +475,30 @@ toilet(10750, 4150, 11200, 4600, 'E');
 bed(6650, 7970, 8652, 8850, 'E', mat.duvet3, mat.ochre);
 table(8000, 6960, 8640, 7870, 750, mat.oak, mat.walnut, 40);
 chair(7400, 7200, 7850, 7650, 'W', mat.dark);
+// 書櫃：靠東牆、接在書桌北側（避開門的開合範圍 x 6700–7600 / y 5025–5925）
+{ const x1 = 8320, x2 = 8652, y1 = 5080, y2 = 6900, top = 2000;
+  const bookM = [mat.rust, mat.indigo, mat.ochre, mat.olive, mat.forest, mat.beige, mat.cognac, mat.fabricL, mat.dark];
+  B(x1, y1, x2, y1 + 25, 0, top, mat.oak); B(x1, y2 - 25, x2, y2, 0, top, mat.oak);       // 側板
+  B(x2 - 15, y1, x2, y2, 0, top, mat.oak);                                                    // 背板
+  B(x1, y1 + 900, x2, y1 + 920, 80, top, mat.oak);                                            // 中隔板
+  B(x1, y1, x2, y2, 0, 80, mat.walnut);                                                       // 踢腳
+  const shelves = [80, 440, 800, 1160, 1520, 1880];
+  shelves.forEach(h => B(x1, y1, x2, y2, h, h + 22, mat.oak)); B(x1, y1, x2, y2, top - 22, top, mat.oak);
+  let k = 0;
+  for (let i = 0; i < shelves.length; i++) {
+    const h0 = shelves[i] + 22;
+    for (const [a, b] of [[y1 + 25, y1 + 900], [y1 + 920, y2 - 25]]) {
+      let y = a + 10;
+      const stop = b - ((i + (a > y1 + 100 ? 1 : 0)) % 3 === 0 ? 300 : 40);                    // 部分格位留白放擺飾
+      while (y < stop - 30) {
+        const w = 25 + ((k * 17) % 30), h = 220 + ((k * 53) % 90);
+        B(x1 + 70 + (k % 3) * 15, y, x2 - 20, y + w, h0, h0 + Math.min(h, 330), bookM[k % bookM.length]);
+        y += w + 2; k++;
+      }
+      if (stop < b - 100) CY((x1 + x2) / 2, stop + 140, 60, h0, h0 + 180, i % 2 ? mat.terracotta : mat.pot);   // 花器擺飾
+    }
+  }
+}
 // 主臥
 bed(8752, 6630, 10852, 8210, 'W', mat.duvet2, mat.indigo);
 nightstand(8760, 6150, 9200, 6600); nightstand(8760, 8240, 9200, 8690);
@@ -512,7 +515,7 @@ plant(6450, 3700, 220, 754);   // 餐桌中央小盆栽
 plant(6750, 1850, 220, 900);   // 中島檯面香草
 plant(6950, 1850, 200, 900);
 plant(11120, 8640, 550);       // 主臥：窗邊角落
-plant(8460, 5250, 420);        // 書房：東北角
+plant(8490, 5300, 220, 2000);  // 書房：書櫃頂小盆栽
 plant(2850, 8620, 550);        // 次臥：窗邊角落
 plant(10050, 2620, 180, 840);  // 主浴洗手台
 plant(450, 4215, 180, 840);    // 浴室洗手台
@@ -573,15 +576,6 @@ art(150, 7020, 500, 700, 1550, 'E', 'circles', 3, mat.oak);      // 次臥：床
 art(150, 7760, 500, 700, 1550, 'E', 'blocks', 3, mat.oak);
 art(8652, 7415, 700, 500, 1550, 'W', 'lines', 0);                // 書房：書桌上方
 
-function lantern(xc, yc, r, hc) {
-  const s = new THREE.Mesh(new THREE.SphereGeometry(r * MM, 28, 20), mat.paper); s.position.set(cx(xc), hc * MM, cz(yc)); artG.add(s);
-  const c = new THREE.Mesh(new THREE.CylinderGeometry(.004, .004, (H - hc - r) * MM, 6), mat.dark); c.position.set(cx(xc), (H + hc + r) / 2 * MM, cz(yc)); artG.add(c);
-}
-lantern(5850, 3700, 220, 1950); lantern(7050, 3700, 220, 1950);   // 餐桌上方
-lantern(4850, 6950, 320, 2150);                                   // 客廳
-lantern(1160, 7390, 260, 2150);                                   // 主臥
-lantern(9800, 7420, 240, 2150);                                   // 次臥
-
 // ---------- 標籤（面積取自平面圖標示） ----------
 const labels = [];
 function label(text, area, x, y, minor = false) {
@@ -595,7 +589,7 @@ label('書房兼臥室', '', 7650, 6200);
 label('主臥', '', 1600, 7300);
 label('浴室', '', 850, 3300);
 label('更衣間', '', 2300, 3300);
-label('洗衣間', '', 10200, 900);
+label('後陽台', '', 10200, 900);
 label('主浴', '', 10400, 3700);
 label('陽台', '', 4600, 9600);
 label('廚房', '', 7000, 1300, true);
@@ -603,22 +597,16 @@ label('入口／玄關', '', 3900, 2700, true);
 
 // ---------- 視角與互動 ----------
 const isTouch = matchMedia('(pointer: coarse)').matches;
-document.getElementById('hint').innerHTML = isTouch
-  ? '單指拖曳：旋轉　雙指捏合：縮放　雙指拖曳：平移'
-  : '左鍵拖曳：旋轉　右鍵拖曳：平移　滾輪：縮放';
 // 鳥瞰（公尺，場景座標）；室內人視角以平面圖 mm 定義：[相機 x,y,高度], [注視 x,y,高度]
 const P = (x, y, h) => [cx(x), h * MM, cz(y)];
 const views = {
-  se: [[8.5, 12.5, 13], [0, 0, 0.3]],
-  nw: [[-9, 12.5, -12], [0, 0, 0]],
-  ne: [[10, 12, -10], [0, 0, 0]],
-  sw: [[-10, 12, 11], [0, 0, 0]],
   top: [[0, 21, 0.01], [0, 0, 0]],
   south: [[0, 6.5, 15], [0, 0.6, 0]],
+  north: [[0, 12, -14], [0, 0.2, 0]],
   entry:   [P(3700, 2050, 1600), P(4600, 5200, 900)],
   living:  [P(6250, 5300, 1650), P(3700, 7600, 800)],
   dining:  [P(3500, 4600, 1650), P(7600, 3000, 800)],
-  kitchen: [P(9000, 3700, 1650), P(6600, 700, 900)],
+  kitchen: [P(8850, 2050, 1650), P(5300, 800, 850)],   // 相機在廚房內東側，避開廚房與餐廳間的隔間牆
   master:  [P(2600, 5150, 1650), P(700, 7500, 600)],
   closet:  [P(2300, 4250, 1650), P(2400, 2000, 1100)],
   second:  [P(11100, 5900, 1650), P(9200, 7900, 600)],
@@ -645,11 +633,8 @@ function stepAnim(now) {
 }
 controls.addEventListener('start', () => { anim = null; });
 const spinBtn = document.getElementById('spin');
-setView('se', true);
+setView('north', true);
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
-const uiBox = document.getElementById('ui'), tg = document.getElementById('toggle');
-tg.onclick = () => { const c = uiBox.classList.toggle('collapsed'); tg.textContent = c ? '選項' : '收合'; };
-if (innerWidth < 640) { uiBox.classList.add('collapsed'); tg.textContent = '選項'; }
 document.querySelectorAll('[data-wall]').forEach(b => b.onclick = () => {
   buildWalls(+b.dataset.wall);
   artG.visible = +b.dataset.wall > 2000;
